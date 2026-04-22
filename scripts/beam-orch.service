@@ -1,0 +1,23 @@
+[Unit]
+Description=BEAM Subnet 105 Orchestrator
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/beam-sn105
+Environment=PYTHONPATH=/root/beam-sn105
+Environment=PATH=/root/beam-sn105/venv/bin
+ExecStart=/root/beam-sn105/venv/bin/python neurons/orchestrator/orchestrator.py \
+    --wallet.name taolumberjackBeamOrch \
+    --wallet.hotkey orch1 \
+    --netuid 105 \
+    --subtensor.network finney \
+    --logging.debug
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
