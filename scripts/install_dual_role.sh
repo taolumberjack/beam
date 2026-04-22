@@ -55,7 +55,7 @@ $VENV_DIR/bin/btcli w create_hotkey --wallet.name taolumberjackBeamOrch --wallet
 
 echo -e "${YELLOW}Creating validator wallet: taoLumberjackBeamVal${NC}"
 $VENV_DIR/bin/btcli w create --wallet.name taoLumberjackBeamVal --no_prompt || true
-$VENV_DIR/bin/btcli w create_hotkey --wallet.name taoLumberjackBeamVal --wallet.hotkey val1 --no_prompt || true
+$VENV_DIR/bin/btcli w create_hotkey --wallet.name taoLumberjackBeamVal --wallet.hotkey va1 --no_prompt || true
 
 # Install systemd services
 echo ""
@@ -100,7 +100,7 @@ Environment=PYTHONPATH=$BEAM_DIR
 Environment=PATH=$VENV_DIR/bin
 ExecStart=$VENV_DIR/bin/python neurons/validator/core/validator.py \
     --wallet.name taoLumberjackBeamVal \
-    --wallet.hotkey val1 \
+    --wallet.hotkey va1 \
     --netuid $NETUID \
     --subtensor.network finney \
     --logging.debug
@@ -144,7 +144,7 @@ echo "   $VENV_DIR/bin/btcli w balance --wallet.name taoLumberjackBeamVal"
 echo ""
 echo "2. Register on subnet $NETUID:"
 echo "   $VENV_DIR/bin/btcli s register --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1"
-echo "   $VENV_DIR/bin/btcli s register --netuid $NETUID --wallet.name taoLumberjackBeamVal --wallet.hotkey val1"
+echo "   $VENV_DIR/bin/btcli s register --netuid $NETUID --wallet.name taoLumberjackBeamVal --wallet.hotkey va1"
 echo ""
 echo "3. Stake ALPHA on orchestrator:"
 echo "   $VENV_DIR/bin/btcli s stake --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --amount 10"

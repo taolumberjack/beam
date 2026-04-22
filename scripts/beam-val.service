@@ -10,7 +10,7 @@ Environment=PYTHONPATH=/root/beam
 Environment=PATH=/opt/beam-venv/bin
 ExecStart=/opt/beam-venv/bin/python neurons/validator/core/validator.py \
     --wallet.name taoLumberjackBeamVal \
-    --wallet.hotkey val1 \
+    --wallet.hotkey va1 \
     --netuid 105 \
     --subtensor.network finney \
     --logging.debug

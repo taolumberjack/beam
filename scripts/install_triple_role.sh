@@ -121,7 +121,7 @@ Environment=PYTHONPATH=$BEAM_DIR
 Environment=PATH=$VENV_DIR/bin
 ExecStart=$VENV_DIR/bin/python neurons/validator/core/validator.py \
     --wallet.name taoLumberjackBeamVal \
-    --wallet.hotkey val1 \
+    --wallet.hotkey va1 \
     --netuid $NETUID \
     --subtensor.network finney
 Restart=always
