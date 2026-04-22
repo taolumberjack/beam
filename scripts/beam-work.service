@@ -1,0 +1,23 @@
+[Unit]
+Description=BEAM Subnet 105 Worker
+After=network.target
+
+[Service]
+Type=simple
+User=itlumberjack
+WorkingDirectory=/home/itlumberjack/beam
+Environment=PYTHONPATH=/home/itlumberjack/beam
+Environment=PATH=/home/itlumberjack/beam-venv/bin
+ExecStart=/home/itlumberjack/beam-venv/bin/python neurons/worker/worker.py \
+    --wallet.name taolumberjackBeamWork \
+    --wallet.hotkey work1 \
+    --netuid 105 \
+    --subtensor.network finney \
+    --logging.debug
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
