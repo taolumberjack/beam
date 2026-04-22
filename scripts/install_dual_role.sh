@@ -21,8 +21,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Get user input
-read -p "GitHub repo URL [https://github.com/taolumberjack/beam-sn105.git]: " REPO_URL
-REPO_URL=${REPO_URL:-"https://github.com/taolumberjack/beam-sn105.git"}
+read -p "GitHub repo URL [https://github.com/taolumberjack/beam.git]: " REPO_URL
+REPO_URL=${REPO_URL:-"https://github.com/taolumberjack/beam.git"}
 
 read -p "Wallet name for Orchestrator [taolumberjackBeamOrch]: " ORCH_WALLET
 ORCH_WALLET=${ORCH_WALLET:-"taolumberjackBeamOrch"}

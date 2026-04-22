@@ -60,7 +60,7 @@ apt update && apt upgrade -y
 apt install -y python3-pip python3-venv git curl build-essential
 
 # 3. Clone repo (patched branch)
-git clone https://github.com/taolumberjack/beam-sn105.git
+git clone https://github.com/taolumberjack/beam.git
 cd beam-sn105
 git checkout taolumberjack-patches
 
