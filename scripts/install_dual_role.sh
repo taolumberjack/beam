@@ -34,6 +34,7 @@ sudo apt install -y python3-pip python3-venv git curl build-essential htop tmux 
 echo -e "${YELLOW}Creating Python virtual environment...${NC}"
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
+export PATH="$VENV_DIR/bin:$PATH"
 
 # Install Bittensor CLI into venv
 echo -e "${YELLOW}Installing Bittensor CLI...${NC}"
@@ -49,12 +50,12 @@ pip install -e .
 echo ""
 echo -e "${GREEN}=== Wallet Setup ===${NC}"
 echo -e "${YELLOW}Creating orchestrator wallet: taolumberjackBeamOrch${NC}"
-btcli w create --wallet.name taolumberjackBeamOrch --no_prompt || true
-btcli w create_hotkey --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --no_prompt || true
+$VENV_DIR/bin/btcli w create --wallet.name taolumberjackBeamOrch --no_prompt || true
+$VENV_DIR/bin/btcli w create_hotkey --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --no_prompt || true
 
 echo -e "${YELLOW}Creating validator wallet: taoLumberjackBeamVal${NC}"
-btcli w create --wallet.name taoLumberjackBeamVal --no_prompt || true
-btcli w create_hotkey --wallet.name taoLumberjackBeamVal --wallet.hotkey val1 --no_prompt || true
+$VENV_DIR/bin/btcli w create --wallet.name taoLumberjackBeamVal --no_prompt || true
+$VENV_DIR/bin/btcli w create_hotkey --wallet.name taoLumberjackBeamVal --wallet.hotkey val1 --no_prompt || true
 
 # Install systemd services
 echo ""
@@ -138,22 +139,22 @@ echo -e "${GREEN}=== Installation Complete ===${NC}"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo "1. Fund your wallets with TAO for registration fees"
-echo "   btcli w balance --wallet.name taolumberjackBeamOrch"
-echo "   btcli w balance --wallet.name taoLumberjackBeamVal"
+echo "   $VENV_DIR/bin/btcli w balance --wallet.name taolumberjackBeamOrch"
+echo "   $VENV_DIR/bin/btcli w balance --wallet.name taoLumberjackBeamVal"
 echo ""
 echo "2. Register on subnet $NETUID:"
-echo "   btcli s register --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1"
-echo "   btcli s register --netuid $NETUID --wallet.name taoLumberjackBeamVal --wallet.hotkey val1"
+echo "   $VENV_DIR/bin/btcli s register --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1"
+echo "   $VENV_DIR/bin/btcli s register --netuid $NETUID --wallet.name taoLumberjackBeamVal --wallet.hotkey val1"
 echo ""
 echo "3. Stake ALPHA on orchestrator:"
-echo "   btcli s stake --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --amount 10"
+echo "   $VENV_DIR/bin/btcli s stake --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --amount 10"
 echo ""
 echo "4. Start services:"
 echo "   sudo systemctl start beam-orch beam-val"
 echo "   sudo systemctl enable beam-orch beam-val"
 echo ""
 echo -e "${GREEN}Wallet addresses:${NC}"
-btcli w list
+$VENV_DIR/bin/btcli w list
 
 echo ""
 echo -e "${YELLOW}Log locations:${NC}"
