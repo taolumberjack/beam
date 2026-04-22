@@ -5,10 +5,10 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/beam-sn105
-Environment=PYTHONPATH=/root/beam-sn105
-Environment=PATH=/root/beam-sn105/venv/bin
-ExecStart=/root/beam-sn105/venv/bin/python neurons/validator/core/validator.py \
+WorkingDirectory=/root/beam
+Environment=PYTHONPATH=/root/beam
+Environment=PATH=/root/beam/venv/bin
+ExecStart=/root/beam/venv/bin/python neurons/validator/core/validator.py \
     --wallet.name taoLumberjackBeamVal \
     --wallet.hotkey val1 \
     --netuid 105 \

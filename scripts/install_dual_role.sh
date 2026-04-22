@@ -45,13 +45,13 @@ pip install bittensor
 # Clone repo
 echo -e "${YELLOW}Cloning repository...${NC}"
 cd /root
-if [ -d "beam-sn105" ]; then
+if [ -d "beam" ]; then
     echo -e "${YELLOW}Directory exists, pulling latest...${NC}"
-    cd beam-sn105
+    cd beam
     git pull
 else
     git clone "$REPO_URL"
-    cd beam-sn105
+    cd beam
 fi
 
 # Checkout patched branch
@@ -90,7 +90,7 @@ sed -i "s/--netuid 105/--netuid $NETUID/g" /etc/systemd/system/beam-*.service
 systemctl daemon-reload
 
 # Create .env file
-cat > /root/beam-sn105/.env << EOF
+cat > /root/beam/.env << EOF
 # BEAM Subnet 105 Configuration
 SUBTENSOR_NETWORK=finney
 SUBTENSOR_CHAIN_ENDPOINT=wss://entrypoint-finney.opentensor.ai:443

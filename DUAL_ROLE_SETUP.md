@@ -60,8 +60,8 @@ apt update && apt upgrade -y
 apt install -y python3-pip python3-venv git curl build-essential
 
 # 3. Clone repo (patched branch)
-git clone https://github.com/taolumberjack/beam.git
-cd beam-sn105
+git clone git@github.com:taolumberjack/beam.git
+cd beam
 git checkout taolumberjack-patches
 
 # 4. Create virtual environment
@@ -91,10 +91,10 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/beam-sn105
-Environment=PYTHONPATH=/root/beam-sn105
-Environment=PATH=/root/beam-sn105/venv/bin
-ExecStart=/root/beam-sn105/venv/bin/python neurons/orchestrator/orchestrator.py \
+WorkingDirectory=/root/beam
+Environment=PYTHONPATH=/root/beam
+Environment=PATH=/root/beam/venv/bin
+ExecStart=/root/beam/venv/bin/python neurons/orchestrator/orchestrator.py \
     --wallet.name taolumberjackBeamOrch \
     --wallet.hotkey orch1 \
     --netuid 105 \
@@ -116,10 +116,10 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/beam-sn105
-Environment=PYTHONPATH=/root/beam-sn105
-Environment=PATH=/root/beam-sn105/venv/bin
-ExecStart=/root/beam-sn105/venv/bin/python neurons/validator/core/validator.py \
+WorkingDirectory=/root/beam
+Environment=PYTHONPATH=/root/beam
+Environment=PATH=/root/beam/venv/bin
+ExecStart=/root/beam/venv/bin/python neurons/validator/core/validator.py \
     --wallet.name taoLumberjackBeamVal \
     --wallet.hotkey val1 \
     --netuid 105 \
@@ -152,8 +152,8 @@ journalctl -u beam-val -f
 ```bash
 # Terminal 1 - Orchestrator
 tmux new -s orch
-source beam-sn105/venv/bin/activate
-cd beam-sn105
+source beam/venv/bin/activate
+cd beam
 python neurons/orchestrator/orchestrator.py \
     --wallet.name taolumberjackBeamOrch \
     --wallet.hotkey orch1 \
@@ -162,8 +162,8 @@ python neurons/orchestrator/orchestrator.py \
 
 # Terminal 2 - Validator
 tmux new -s val
-source beam-sn105/venv/bin/activate
-cd beam-sn105
+source beam/venv/bin/activate
+cd beam
 python neurons/validator/core/validator.py \
     --wallet.name taoLumberjackBeamVal \
     --wallet.hotkey val1 \
@@ -204,7 +204,7 @@ TCP 9945   - Subtensor WS (if running local node)
 ## .env Configuration (Key Settings)
 
 ```bash
-# /root/beam-sn105/.env
+# /root/beam/.env
 
 # Subtensor
 SUBTENSOR_NETWORK=finney
