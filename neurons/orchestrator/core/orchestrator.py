@@ -1183,6 +1183,8 @@ class Orchestrator:
                 await self._reward_mgr.process_payment_retry_queue(
                     self.current_epoch, self.wallet, self.subtensor,
                     self.hotkey or "", self.db, self.subnet_core_client,
+                    netuid=getattr(self.settings, 'netuid', 105),
+                    alpha_per_chunk=getattr(self.settings, 'alpha_per_chunk', 0.5),
                 )
                 queue_after = len(self._reward_mgr._payment_retry_queue)
                 # If some retries succeeded, reset payment failure counter
