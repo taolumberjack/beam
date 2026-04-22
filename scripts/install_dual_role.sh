@@ -1,6 +1,6 @@
 #!/bin/bash
 # BEAM Subnet 105 - Dual Role Auto-Install Script
-# Run as regular user (itlumberjack) with sudo privileges
+# Run as itlumberjack user (will prompt for sudo password when needed)
 
 set -e
 
@@ -11,8 +11,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Configuration
-USER="itlumberjack"
-USER_HOME="/home/$USER"
+USER="$(whoami)"
+USER_HOME="$HOME"
 VENV_DIR="$USER_HOME/beam-venv"
 BEAM_DIR="$USER_HOME/beam"
 
@@ -21,34 +21,12 @@ echo "Installing as user: $USER"
 echo "Home directory: $USER_HOME"
 echo ""
 
-# Check we're running as the correct user
-if [ "$USER" != "$(whoami)" ]; then
-    echo -e "${RED}Please run this script as user '$USER'${NC}"
-    echo "Usage: sudo -u $USER bash install_dual_role.sh"
-    exit 1
-fi
-
-# Check sudo access
-if ! sudo -n true 2>/dev/null; then
-    echo -e "${RED}User $USER needs passwordless sudo or interactive sudo${NC}"
-    exit 1
-fi
-
 # Get user input
-read -p "GitHub repo URL [https://github.com/taolumberjack/beam.git]: " REPO_URL
-REPO_URL=${REPO_URL:-"https://github.com/taolumberjack/beam.git"}
-
-read -p "Wallet name for Orchestrator [taolumberjackBeamOrch]: " ORCH_WALLET
-ORCH_WALLET=${ORCH_WALLET:-"taolumberjackBeamOrch"}
-
-read -p "Wallet name for Validator [taoLumberjackBeamVal]: " VAL_WALLET
-VAL_WALLET=${VAL_WALLET:-"taoLumberjackBeamVal"}
-
 read -p "Subnet UID [105]: " NETUID
 NETUID=${NETUID:-"105"}
 
 echo ""
-echo -e "${YELLOW}Installing system dependencies...${NC}"
+echo -e "${YELLOW}Installing system dependencies (may prompt for sudo password)...${NC}"
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y python3-pip python3-venv git curl build-essential htop tmux jq python3-full
 
@@ -62,42 +40,26 @@ echo -e "${YELLOW}Installing Bittensor CLI...${NC}"
 pip install --upgrade pip
 pip install bittensor
 
-# Clone repo
-echo -e "${YELLOW}Cloning repository...${NC}"
-cd "$USER_HOME"
-if [ -d "beam" ]; then
-    echo -e "${YELLOW}Directory exists, pulling latest...${NC}"
-    cd beam
-    git pull
-else
-    git clone "$REPO_URL" "$BEAM_DIR"
-    cd "$BEAM_DIR"
-fi
-
-# Checkout patched branch
-echo -e "${YELLOW}Checking out taolumberjack-patches branch...${NC}"
-git checkout taolumberjack-patches || git checkout -b taolumberjack-patches
-
-# Install BEAM into the venv
+# Install BEAM dependencies
 echo -e "${YELLOW}Installing BEAM dependencies...${NC}"
+cd "$BEAM_DIR"
 pip install -e .
 
 # Create wallets
 echo ""
 echo -e "${GREEN}=== Wallet Setup ===${NC}"
-echo -e "${YELLOW}Creating orchestrator wallet: $ORCH_WALLET${NC}"
-btcli w create --wallet.name "$ORCH_WALLET" --no_prompt || true
-btcli w create_hotkey --wallet.name "$ORCH_WALLET" --wallet.hotkey orch1 --no_prompt || true
+echo -e "${YELLOW}Creating orchestrator wallet: taolumberjackBeamOrch${NC}"
+btcli w create --wallet.name taolumberjackBeamOrch --no_prompt || true
+btcli w create_hotkey --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --no_prompt || true
 
-echo -e "${YELLOW}Creating validator wallet: $VAL_WALLET${NC}"
-btcli w create --wallet.name "$VAL_WALLET" --no_prompt || true
-btcli w create_hotkey --wallet.name "$VAL_WALLET" --wallet.hotkey val1 --no_prompt || true
+echo -e "${YELLOW}Creating validator wallet: taoLumberjackBeamVal${NC}"
+btcli w create --wallet.name taoLumberjackBeamVal --no_prompt || true
+btcli w create_hotkey --wallet.name taoLumberjackBeamVal --wallet.hotkey val1 --no_prompt || true
 
 # Install systemd services
 echo ""
-echo -e "${YELLOW}Installing systemd services...${NC}"
+echo -e "${YELLOW}Installing systemd services (may prompt for sudo password)...${NC}"
 
-# Create service files with correct user
 sudo tee /etc/systemd/system/beam-orch.service > /dev/null << EOF
 [Unit]
 Description=BEAM Subnet 105 Orchestrator
@@ -110,7 +72,7 @@ WorkingDirectory=$BEAM_DIR
 Environment=PYTHONPATH=$BEAM_DIR
 Environment=PATH=$VENV_DIR/bin
 ExecStart=$VENV_DIR/bin/python neurons/orchestrator/orchestrator.py \
-    --wallet.name $ORCH_WALLET \
+    --wallet.name taolumberjackBeamOrch \
     --wallet.hotkey orch1 \
     --netuid $NETUID \
     --subtensor.network finney \
@@ -136,7 +98,7 @@ WorkingDirectory=$BEAM_DIR
 Environment=PYTHONPATH=$BEAM_DIR
 Environment=PATH=$VENV_DIR/bin
 ExecStart=$VENV_DIR/bin/python neurons/validator/core/validator.py \
-    --wallet.name $VAL_WALLET \
+    --wallet.name taoLumberjackBeamVal \
     --wallet.hotkey val1 \
     --netuid $NETUID \
     --subtensor.network finney \
@@ -176,15 +138,15 @@ echo -e "${GREEN}=== Installation Complete ===${NC}"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo "1. Fund your wallets with TAO for registration fees"
-echo "   - Orchestrator: btcli w balance --wallet.name $ORCH_WALLET"
-echo "   - Validator: btcli w balance --wallet.name $VAL_WALLET"
+echo "   btcli w balance --wallet.name taolumberjackBeamOrch"
+echo "   btcli w balance --wallet.name taoLumberjackBeamVal"
 echo ""
 echo "2. Register on subnet $NETUID:"
-echo "   btcli s register --netuid $NETUID --wallet.name $ORCH_WALLET --wallet.hotkey orch1"
-echo "   btcli s register --netuid $NETUID --wallet.name $VAL_WALLET --wallet.hotkey val1"
+echo "   btcli s register --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1"
+echo "   btcli s register --netuid $NETUID --wallet.name taoLumberjackBeamVal --wallet.hotkey val1"
 echo ""
 echo "3. Stake ALPHA on orchestrator:"
-echo "   btcli s stake --netuid $NETUID --wallet.name $ORCH_WALLET --wallet.hotkey orch1 --amount 10"
+echo "   btcli s stake --netuid $NETUID --wallet.name taolumberjackBeamOrch --wallet.hotkey orch1 --amount 10"
 echo ""
 echo "4. Start services:"
 echo "   sudo systemctl start beam-orch beam-val"
