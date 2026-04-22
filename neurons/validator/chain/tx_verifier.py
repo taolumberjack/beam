@@ -91,8 +91,8 @@ class TxVerifier:
             self._cache[tx_hash] = result
             return result
 
-        # Validate sender
-        if result.from_address != expected_from:
+        # Validate sender (skip if expected_from is empty — used when sender is not yet known)
+        if expected_from and result.from_address != expected_from:
             result = TxVerificationResult(
                 is_valid=False,
                 error=f"sender mismatch: expected {expected_from[:16]}..., got {result.from_address[:16] if result.from_address else 'None'}...",
@@ -267,6 +267,49 @@ class TxVerifier:
             "valid": valid,
             "invalid": invalid,
         }
+
+    def _safe_hex_str(self, value) -> str:
+        """Convert bytes or mixed types to hex string safely."""
+        if isinstance(value, bytes):
+            return "0x" + value.hex()
+        elif isinstance(value, str):
+            # Handle Python repr of bytes: "b'0xabc...'"
+            if value.startswith("b'") and value.endswith("'"):
+                inner = value[2:-1]  # strip b'...'
+                if inner.startswith("0x"):
+                    return inner
+                else:
+                    return "0x" + inner
+            if not value.startswith("0x"):
+                return "0x" + value
+            return value
+        else:
+            return str(value)
+
+    def _extract_tx_hash(self, response_or_receipt) -> str:
+        """Extract extrinsic_hash:block_hash from various response types."""
+        extrinsic_hash = None
+        block_hash = None
+        
+        # Handle ExtrinsicResponse (SDK v10+)
+        if hasattr(response_or_receipt, 'extrinsic_receipt'):
+            receipt = response_or_receipt.extrinsic_receipt
+            if receipt:
+                extrinsic_hash = getattr(receipt, 'extrinsic_hash', None)
+                block_hash = getattr(receipt, 'block_hash', None)
+        
+        # Handle receipt directly
+        elif hasattr(response_or_receipt, 'extrinsic_hash'):
+            extrinsic_hash = response_or_receipt.extrinsic_hash
+            block_hash = getattr(response_or_receipt, 'block_hash', None)
+        
+        # Format to hex strings
+        if extrinsic_hash and block_hash:
+            return f"{self._safe_hex_str(extrinsic_hash)}:{self._safe_hex_str(block_hash)}"
+        elif extrinsic_hash:
+            return self._safe_hex_str(extrinsic_hash)
+        else:
+            return ""
 
 
 class AlphaPaymentVerifier:
