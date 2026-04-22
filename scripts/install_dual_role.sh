@@ -39,7 +39,7 @@ export PATH="$VENV_DIR/bin:$PATH"
 # Install Bittensor CLI into venv
 echo -e "${YELLOW}Installing Bittensor CLI...${NC}"
 pip install --upgrade pip
-pip install bittensor-cli
+pip install bittensor bittensor-cli
 
 # Install BEAM dependencies
 echo -e "${YELLOW}Installing BEAM dependencies...${NC}"
