@@ -1,6 +1,6 @@
 #!/bin/bash
 # BEAM Subnet 105 - Dual Role Auto-Install Script
-# Run as root on fresh Ubuntu 22.04 VPS
+# Run as regular user (itlumberjack) with sudo privileges
 
 set -e
 
@@ -8,15 +8,29 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
+
+# Configuration
+USER="itlumberjack"
+USER_HOME="/home/$USER"
+VENV_DIR="$USER_HOME/beam-venv"
+BEAM_DIR="$USER_HOME/beam"
 
 echo -e "${GREEN}=== BEAM Subnet 105 Dual Role Setup ===${NC}"
-echo "This will install both Orchestrator and Validator"
+echo "Installing as user: $USER"
+echo "Home directory: $USER_HOME"
 echo ""
 
-# Check root
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Please run as root${NC}"
+# Check we're running as the correct user
+if [ "$USER" != "$(whoami)" ]; then
+    echo -e "${RED}Please run this script as user '$USER'${NC}"
+    echo "Usage: sudo -u $USER bash install_dual_role.sh"
+    exit 1
+fi
+
+# Check sudo access
+if ! sudo -n true 2>/dev/null; then
+    echo -e "${RED}User $USER needs passwordless sudo or interactive sudo${NC}"
     exit 1
 fi
 
@@ -35,13 +49,13 @@ NETUID=${NETUID:-"105"}
 
 echo ""
 echo -e "${YELLOW}Installing system dependencies...${NC}"
-apt update && apt upgrade -y
-apt install -y python3-pip python3-venv git curl build-essential htop tmux jq python3-full
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-pip python3-venv git curl build-essential htop tmux jq python3-full
 
-# Create virtual environment FIRST
+# Create virtual environment
 echo -e "${YELLOW}Creating Python virtual environment...${NC}"
-python3 -m venv /opt/beam-venv
-source /opt/beam-venv/bin/activate
+python3 -m venv "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
 
 # Install Bittensor CLI into venv
 echo -e "${YELLOW}Installing Bittensor CLI...${NC}"
@@ -50,22 +64,22 @@ pip install bittensor
 
 # Clone repo
 echo -e "${YELLOW}Cloning repository...${NC}"
-cd /root
+cd "$USER_HOME"
 if [ -d "beam" ]; then
     echo -e "${YELLOW}Directory exists, pulling latest...${NC}"
     cd beam
     git pull
 else
-    git clone "$REPO_URL"
-    cd beam
+    git clone "$REPO_URL" "$BEAM_DIR"
+    cd "$BEAM_DIR"
 fi
 
 # Checkout patched branch
 echo -e "${YELLOW}Checking out taolumberjack-patches branch...${NC}"
 git checkout taolumberjack-patches || git checkout -b taolumberjack-patches
 
-# Install BEAM into the SAME venv
-echo -e "${YELLOW}Setting up Python environment...${NC}"
+# Install BEAM into the venv
+echo -e "${YELLOW}Installing BEAM dependencies...${NC}"
 pip install -e .
 
 # Create wallets
@@ -82,19 +96,65 @@ btcli w create_hotkey --wallet.name "$VAL_WALLET" --wallet.hotkey val1 --no_prom
 # Install systemd services
 echo ""
 echo -e "${YELLOW}Installing systemd services...${NC}"
-cp scripts/beam-orch.service /etc/systemd/system/
-cp scripts/beam-val.service /etc/systemd/system/
 
-# Update service files with wallet names
-sed -i "s/taolumberjackBeamOrch/$ORCH_WALLET/g" /etc/systemd/system/beam-orch.service
-sed -i "s/taoLumberjackBeamVal/$VAL_WALLET/g" /etc/systemd/system/beam-val.service
-sed -i "s/--netuid 105/--netuid $NETUID/g" /etc/systemd/system/beam-*.service
+# Create service files with correct user
+sudo tee /etc/systemd/system/beam-orch.service > /dev/null << EOF
+[Unit]
+Description=BEAM Subnet 105 Orchestrator
+After=network.target
 
-systemctl daemon-reload
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$BEAM_DIR
+Environment=PYTHONPATH=$BEAM_DIR
+Environment=PATH=$VENV_DIR/bin
+ExecStart=$VENV_DIR/bin/python neurons/orchestrator/orchestrator.py \
+    --wallet.name $ORCH_WALLET \
+    --wallet.hotkey orch1 \
+    --netuid $NETUID \
+    --subtensor.network finney \
+    --logging.debug
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /etc/systemd/system/beam-val.service > /dev/null << EOF
+[Unit]
+Description=BEAM Subnet 105 Validator
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$BEAM_DIR
+Environment=PYTHONPATH=$BEAM_DIR
+Environment=PATH=$VENV_DIR/bin
+ExecStart=$VENV_DIR/bin/python neurons/validator/core/validator.py \
+    --wallet.name $VAL_WALLET \
+    --wallet.hotkey val1 \
+    --netuid $NETUID \
+    --subtensor.network finney \
+    --logging.debug
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
 
 # Create .env file
-cat > /root/beam/.env << EOF
-# BEAM Subnet 105 Configuration
+cat > "$BEAM_DIR/.env" << EOF
+# BEAM Subnet $NETUID Configuration
 SUBTENSOR_NETWORK=finney
 SUBTENSOR_CHAIN_ENDPOINT=wss://entrypoint-finney.opentensor.ai:443
 NETUID=$NETUID
@@ -107,6 +167,9 @@ MIN_PAYMENT_THRESHOLD=0.0005
 VALIDATION_INTERVAL=300
 WEIGHT_SET_INTERVAL=3600
 EOF
+
+# Set ownership
+sudo chown -R $USER:$USER "$BEAM_DIR"
 
 echo ""
 echo -e "${GREEN}=== Installation Complete ===${NC}"
@@ -124,15 +187,15 @@ echo "3. Stake ALPHA on orchestrator:"
 echo "   btcli s stake --netuid $NETUID --wallet.name $ORCH_WALLET --wallet.hotkey orch1 --amount 10"
 echo ""
 echo "4. Start services:"
-echo "   systemctl start beam-orch beam-val"
-echo "   systemctl enable beam-orch beam-val"
+echo "   sudo systemctl start beam-orch beam-val"
+echo "   sudo systemctl enable beam-orch beam-val"
 echo ""
 echo -e "${GREEN}Wallet addresses:${NC}"
 btcli w list
 
 echo ""
 echo -e "${YELLOW}Log locations:${NC}"
-echo "   Orchestrator: journalctl -u beam-orch -f"
-echo "   Validator:    journalctl -u beam-val -f"
+echo "   Orchestrator: sudo journalctl -u beam-orch -f"
+echo "   Validator:    sudo journalctl -u beam-val -f"
 echo ""
 echo -e "${GREEN}Done!${NC}"
