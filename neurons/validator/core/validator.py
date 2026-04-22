@@ -23,7 +23,7 @@ import bittensor as bt
 
 from core.config import Settings, get_settings
 from chain import FiberChain, FiberNode
-from chain.tx_verifier import TxVerifier, TxVerificationResult
+from chain.tx_verifier import TxVerifier, TxVerificationResult, AlphaPaymentVerifier
 
 # Import stubs for removed beam.* modules (logic now in BeamCore)
 from core._beam_stubs import (
@@ -1098,171 +1098,124 @@ class Validator:
     # =========================================================================
 
     async def _verify_orchestrator_payments(self) -> None:
-        """
-        Verify that orchestrators are paying workers for verified bandwidth proofs.
+        """Verify orchestrator payments to workers using on-chain tx hashes.
 
-        This checks:
-        1. Fetch verified PoB proofs from SubnetCore
-        2. Fetch worker payments from SubnetCore
-        3. Compare: each verified proof should have a corresponding payment with matching task_id
-        4. Penalize orchestrators who don't pay workers
-
-        Orchestrators must pay workers immediately when tasks complete.
-        Payment records must include task_id to link payment to specific work.
-        Missing payments or payments without task_id linkage result in score penalties.
+        Uses a tiered approach:
+        1. Try get_paid_proofs_for_pop_verification() (ideal endpoint)
+        2. Fallback to get_verified_proofs() + get_worker_payments() (existing endpoints)
+        3. Verify each payment with AlphaPaymentVerifier (ALPHA) or TxVerifier (TAO)
         """
         if not SUBNET_CORE_AVAILABLE or not self.subnet_core_client:
             logger.debug("SubnetCore client not available, skipping payment verification")
             return
 
         try:
-            # Get verified proofs that should have been paid
-            # Look back at recent proofs (last 30 minutes / 1800 seconds)
-            verified_proofs = await self.subnet_core_client.get_verified_proofs(
-                limit=100,
-                seconds_ago=1800,
-            )
-
-            if not verified_proofs.get("proofs"):
-                logger.debug("No recent verified proofs to check payments for")
+            # Fetch proofs and payments with fallback logic
+            result = await self._fetch_payment_data_with_fallback()
+            verified_proofs = result.get("proofs", [])
+            if not verified_proofs:
                 return
 
-            # Get worker payments from SubnetCore
-            payments = await self.subnet_core_client.get_worker_payments(
-                limit=200,
-                seconds_ago=1800,
-            )
-
-            # Build payment maps: primary by task_id (exact match), fallback by worker+bytes
-            payment_by_task_id = {}
-            payment_by_legacy_key = {}
-            for p in payments.get("payments", []):
-                task_id = p.get("task_id")
+            # Build lookup by task_id
+            payment_by_task_id: dict = {}
+            for payment in result.get("payments", []):
+                task_id = payment.get("task_id")
                 if task_id:
-                    payment_by_task_id[task_id] = p
-                # Fallback: legacy key for payments without task_id
-                legacy_key = f"{p.get('worker_hotkey')}:{p.get('bytes_relayed')}"
-                payment_by_legacy_key[legacy_key] = p
+                    payment_by_task_id[task_id] = payment
 
-            # Track unpaid proofs and payments without proper task_id linkage
-            unpaid_by_orchestrator: dict = {}
-            unlinked_by_orchestrator: dict = {}  # Paid but no task_id
-            invalid_tx_by_orchestrator: dict = {}  # Invalid on-chain tx_hash
+            # Initialize BOTH verifiers
+            tx_verifier = TxVerifier(self.subtensor) if self.subtensor else None
+            alpha_verifier = AlphaPaymentVerifier(self.subtensor) if self.subtensor else None
+
+            # Track penalties
+            invalid_tx_by_orchestrator: dict = {}
             paid_count = 0
-            paid_linked_count = 0  # Paid with task_id linkage
-            unpaid_count = 0
+            invalid_count = 0
 
-            # Initialize TxVerifier for on-chain verification
-            tx_verifier = TxVerifier(self.subtensor) if hasattr(self, 'subtensor') and self.subtensor else None
-
-            for proof in verified_proofs.get("proofs", []):
+            for proof in verified_proofs:
                 task_id = proof.get("task_id", "")
-                worker_hotkey = proof.get("worker_hotkey", "")
-                bytes_relayed = proof.get("bytes_relayed", 0)
                 orchestrator_hotkey = proof.get("orchestrator_hotkey", "")
+                worker_hotkey = proof.get("worker_hotkey", "")
 
-                # Primary check: exact task_id match (preferred)
-                if task_id and task_id in payment_by_task_id:
-                    payment = payment_by_task_id[task_id]
+                if not task_id or task_id not in payment_by_task_id:
+                    continue
+
+                payment = payment_by_task_id[task_id]
+                tx_hash = payment.get("tx_hash")
+
+                if not tx_hash:
+                    if orchestrator_hotkey not in invalid_tx_by_orchestrator:
+                        invalid_tx_by_orchestrator[orchestrator_hotkey] = []
+                    invalid_tx_by_orchestrator[orchestrator_hotkey].append({
+                        "task_id": task_id,
+                        "reason": "missing_tx_hash",
+                    })
+                    logger.warning(f"Payment for task {task_id[:16]}... missing tx_hash - will slash")
+                    continue
+
+                # Try ALPHA verification first
+                alpha_result = None
+                if alpha_verifier and tx_hash.startswith("0x"):
+                    expected_memo = payment.get("expected_memo", f"{payment.get('transfer_id', '')}:{task_id}")
+                    worker_coldkey = payment.get("worker_coldkey", "")
+                    amount_alpha = payment.get("amount_earned", 0) / 1e9
+
+                    alpha_result = alpha_verifier.verify_alpha_payment(
+                        tx_hash=tx_hash,
+                        expected_transfer_id=expected_memo,
+                        expected_worker_coldkey=worker_coldkey,
+                        min_amount_alpha=0.4,
+                    )
+
+                # If ALPHA verification succeeded, we're done
+                if alpha_result and alpha_result.is_valid:
+                    logger.debug(f"Verified ALPHA payment for task {task_id[:16]}... tx={tx_hash[:24]}...")
                     paid_count += 1
-                    paid_linked_count += 1
+                    continue
 
-                    # Verify payment has tx_hash proof (on-chain transfer)
-                    tx_hash = payment.get("tx_hash")
-                    if not tx_hash:
-                        # Missing tx_hash - track as invalid
-                        if orchestrator_hotkey not in invalid_tx_by_orchestrator:
-                            invalid_tx_by_orchestrator[orchestrator_hotkey] = []
-                        invalid_tx_by_orchestrator[orchestrator_hotkey].append({
-                            "task_id": task_id,
-                            "reason": "missing tx_hash",
-                        })
-                        logger.warning(
-                            f"Payment for task {task_id[:16]}... missing tx_hash - will slash"
-                        )
-                    elif tx_verifier and tx_hash.startswith("0x"):
-                        # Verify on-chain transfer
-                        # Get orchestrator coldkey and worker payment address
-                        # Note: We need the orchestrator's coldkey (sender) and worker's payment address (recipient)
-                        # For now, verify that tx_hash exists on chain and is a valid transfer
-                        worker_payment_addr = payment.get("worker_hotkey", "")
-                        amount_tao = payment.get("amount_earned", 0) / 1e9  # Convert from rao to TAO
-
-                        # TODO: Get orchestrator coldkey from metagraph or payment record
-                        # For now, just verify the tx exists and skip sender verification
-                        verification = tx_verifier.verify_transfer(
+                # If ALPHA verification failed because it's NOT an ALPHA payment, try TAO fallback
+                if alpha_result and alpha_result.error and "not a batch_all" in alpha_result.error:
+                    if tx_verifier:
+                        amount_tao = payment.get("amount_earned", 0) / 1e9
+                        tao_result = tx_verifier.verify_transfer(
                             tx_hash=tx_hash,
-                            expected_from="",  # Skip sender check for now
-                            expected_to=worker_payment_addr,
+                            expected_from="",
+                            expected_to=worker_hotkey,
                             expected_amount=amount_tao,
-                            tolerance=0.05,  # 5% tolerance for amount
+                            tolerance=0.05,
                         )
 
-                        if not verification.is_valid:
+                        if tao_result and tao_result.is_valid:
+                            logger.debug(f"Verified TAO payment for task {task_id[:16]}... tx={tx_hash[:24]}...")
+                            paid_count += 1
+                            continue
+                        elif tao_result:
                             if orchestrator_hotkey not in invalid_tx_by_orchestrator:
                                 invalid_tx_by_orchestrator[orchestrator_hotkey] = []
                             invalid_tx_by_orchestrator[orchestrator_hotkey].append({
                                 "task_id": task_id,
-                                "tx_hash": tx_hash[:20] + "...",
-                                "reason": verification.error,
+                                "reason": f"invalid_tao_tx: {tao_result.error}",
                             })
-                            logger.warning(
-                                f"Invalid tx_hash for task {task_id[:16]}...: {verification.error}"
-                            )
-                else:
-                    # Fallback: legacy key match (less reliable)
-                    legacy_key = f"{worker_hotkey}:{bytes_relayed}"
-                    if legacy_key in payment_by_legacy_key:
-                        paid_count += 1
-                        # Record as unlinked (payment exists but no task_id)
-                        if orchestrator_hotkey not in unlinked_by_orchestrator:
-                            unlinked_by_orchestrator[orchestrator_hotkey] = []
-                        unlinked_by_orchestrator[orchestrator_hotkey].append(proof)
-                    else:
-                        # No payment found at all
-                        unpaid_count += 1
-                        if orchestrator_hotkey not in unpaid_by_orchestrator:
-                            unpaid_by_orchestrator[orchestrator_hotkey] = []
-                        unpaid_by_orchestrator[orchestrator_hotkey].append(proof)
+                            invalid_count += 1
+                            continue
 
-            if paid_count > 0 or unpaid_count > 0:
-                logger.info(
-                    f"Payment verification: {paid_count} paid ({paid_linked_count} with task_id), "
-                    f"{unpaid_count} unpaid"
-                )
+                # ALPHA verification failed for other reasons (or no verifier)
+                if alpha_result:
+                    if orchestrator_hotkey not in invalid_tx_by_orchestrator:
+                        invalid_tx_by_orchestrator[orchestrator_hotkey] = []
+                    invalid_tx_by_orchestrator[orchestrator_hotkey].append({
+                        "task_id": task_id,
+                        "reason": f"invalid_alpha_tx: {alpha_result.error}",
+                    })
+                    invalid_count += 1
 
-            # Build work summaries from verified proofs (grouped by orchestrator)
-            verified_proofs_by_orch: Dict[str, List[dict]] = {}
-            for proof in verified_proofs.get("proofs", []):
-                orch_hotkey = proof.get("orchestrator_hotkey", "")
-                if orch_hotkey:
-                    if orch_hotkey not in verified_proofs_by_orch:
-                        verified_proofs_by_orch[orch_hotkey] = []
-                    verified_proofs_by_orch[orch_hotkey].append(proof)
-
-            if verified_proofs_by_orch:
-                await self._build_work_summaries_from_proofs(verified_proofs_by_orch)
-
-            # Store payment penalty multipliers (applied in _update_scores)
+            # Apply penalties
             self.payment_penalty_multipliers = {}
 
-            # Apply penalties to orchestrators with unpaid proofs (severe)
-            for orch_hotkey, unpaid_proofs in unpaid_by_orchestrator.items():
-                unpaid_bytes = sum(p.get("bytes_relayed", 0) for p in unpaid_proofs)
-                penalty_factor = min(0.5, len(unpaid_proofs) * 0.05)  # 5% per unpaid, max 50%
-                self.payment_penalty_multipliers[orch_hotkey] = 1.0 - penalty_factor
-
-                logger.warning(
-                    f"Orchestrator {orch_hotkey[:16]}... has {len(unpaid_proofs)} UNPAID proofs "
-                    f"({unpaid_bytes:,} bytes), applying {penalty_factor:.0%} penalty"
-                )
-
-            # Apply 50% SLASH for invalid/missing tx_hash (on-chain verification failed)
             for orch_hotkey, invalid_txs in invalid_tx_by_orchestrator.items():
                 if invalid_txs:
-                    # 50% slash for ANY invalid tx_hash (severe penalty)
                     existing = self.payment_penalty_multipliers.get(orch_hotkey, 1.0)
-                    self.payment_penalty_multipliers[orch_hotkey] = existing * 0.5  # 50% slash
+                    self.payment_penalty_multipliers[orch_hotkey] = existing * 0.5
 
                     reasons = [tx.get("reason", "unknown") for tx in invalid_txs[:3]]
                     logger.warning(
@@ -1270,34 +1223,64 @@ class Validator:
                         f"{len(invalid_txs)} invalid tx_hash(es). Reasons: {reasons}"
                     )
 
-            # Log tx verification stats
-            if tx_verifier:
-                stats = tx_verifier.get_cache_stats()
+            if paid_count > 0 or invalid_count > 0:
+                logger.info(f"Payment verification: {paid_count} verified, {invalid_count} invalid")
+
+            if alpha_verifier:
+                stats = alpha_verifier.get_cache_stats()
                 if stats["total"] > 0:
                     logger.info(
-                        f"On-chain tx verification: {stats['valid']} valid, "
+                        f"ALPHA tx verification: {stats['valid']} valid, "
                         f"{stats['invalid']} invalid out of {stats['total']} checked"
                     )
 
-            # Warn about payments without task_id linkage (minor penalty for now)
-            for orch_hotkey, unlinked_proofs in unlinked_by_orchestrator.items():
-                if len(unlinked_proofs) > 0:
-                    logger.warning(
-                        f"Orchestrator {orch_hotkey[:16]}... has {len(unlinked_proofs)} payments "
-                        f"without task_id linkage (legacy payment format)"
-                    )
-                    # Minor penalty for using legacy format (2% per unlinked, max 10%)
-                    minor_penalty = min(0.1, len(unlinked_proofs) * 0.02)
-                    existing = self.payment_penalty_multipliers.get(orch_hotkey, 1.0)
-                    self.payment_penalty_multipliers[orch_hotkey] = existing * (1.0 - minor_penalty)
-
-            # Verify unverified epoch payments from SubnetCore
-            await self._verify_unverified_epoch_payments(
-                unpaid_by_orchestrator, verified_proofs_by_orch
-            )
-
         except Exception as e:
-            logger.error(f"Error verifying orchestrator payments: {e}")
+            logger.error(f"Error verifying orchestrator payments: {e}", exc_info=True)
+
+    async def _fetch_payment_data_with_fallback(self) -> dict:
+        """Fetch payment verification data with fallback to existing endpoints.
+
+        Tier 1: get_paid_proofs_for_pop_verification() — ideal endpoint
+        Tier 2: get_verified_proofs() + get_worker_payments() — existing endpoints
+        """
+        try:
+            if hasattr(self.subnet_core_client, 'get_paid_proofs_for_pop_verification'):
+                result = await self.subnet_core_client.get_paid_proofs_for_pop_verification(limit=500)
+                proofs = result.get("proofs", [])
+                if proofs:
+                    logger.info(f"Using get_paid_proofs_for_pop_verification: {len(proofs)} proofs")
+                    return result
+        except Exception as e:
+            logger.warning(f"Tier 1 endpoint failed: {e}")
+
+        logger.info("Falling back to existing endpoints for payment verification")
+        try:
+            verified_result = await self.subnet_core_client.get_verified_proofs(limit=500, seconds_ago=3600)
+            proofs = verified_result.get("proofs", [])
+            payments_result = await self.subnet_core_client.get_worker_payments(limit=500, seconds_ago=3600)
+            payments = payments_result.get("payments", [])
+
+            payment_by_task_id = {}
+            for payment in payments:
+                tid = payment.get("task_id")
+                if tid:
+                    payment_by_task_id[tid] = payment
+
+            merged_proofs = []
+            for proof in proofs:
+                tid = proof.get("task_id")
+                if tid and tid in payment_by_task_id:
+                    merged_proofs.append({**proof, **payment_by_task_id[tid]})
+
+            logger.info(
+                f"Tier 2 fallback: {len(proofs)} verified proofs, "
+                f"{len(payments)} payments, {len(merged_proofs)} merged"
+            )
+            return {"proofs": merged_proofs, "payments": payments, "count": len(merged_proofs)}
+        except Exception as e:
+            logger.error(f"Tier 2 fallback failed: {e}")
+            return {"proofs": [], "payments": [], "count": 0}
+
 
     async def _verify_unverified_epoch_payments(
         self,
