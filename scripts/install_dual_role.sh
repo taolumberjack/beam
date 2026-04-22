@@ -36,10 +36,16 @@ NETUID=${NETUID:-"105"}
 echo ""
 echo -e "${YELLOW}Installing system dependencies...${NC}"
 apt update && apt upgrade -y
-apt install -y python3-pip python3-venv git curl build-essential htop tmux jq
+apt install -y python3-pip python3-venv git curl build-essential htop tmux jq python3-full
 
-# Install Bittensor CLI
+# Create virtual environment FIRST
+echo -e "${YELLOW}Creating Python virtual environment...${NC}"
+python3 -m venv /opt/beam-venv
+source /opt/beam-venv/bin/activate
+
+# Install Bittensor CLI into venv
 echo -e "${YELLOW}Installing Bittensor CLI...${NC}"
+pip install --upgrade pip
 pip install bittensor
 
 # Clone repo
@@ -58,11 +64,8 @@ fi
 echo -e "${YELLOW}Checking out taolumberjack-patches branch...${NC}"
 git checkout taolumberjack-patches || git checkout -b taolumberjack-patches
 
-# Create virtual environment
+# Install BEAM into the SAME venv
 echo -e "${YELLOW}Setting up Python environment...${NC}"
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
 pip install -e .
 
 # Create wallets

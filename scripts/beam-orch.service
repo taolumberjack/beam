@@ -7,8 +7,8 @@ Type=simple
 User=root
 WorkingDirectory=/root/beam
 Environment=PYTHONPATH=/root/beam
-Environment=PATH=/root/beam/venv/bin
-ExecStart=/root/beam/venv/bin/python neurons/orchestrator/orchestrator.py \
+Environment=PATH=/opt/beam-venv/bin
+ExecStart=/opt/beam-venv/bin/python neurons/orchestrator/orchestrator.py \
     --wallet.name taolumberjackBeamOrch \
     --wallet.hotkey orch1 \
     --netuid 105 \
