@@ -354,7 +354,7 @@ async def report_chunk_complete(
             return True
         return False
     except Exception as e:
-        print(f"[Worker] Failed to report chunk completion: {e}")
+        print(f"[Worker] Failed to report chunk completion: {type(e).__name__}: {e}")
         return False
 
 
