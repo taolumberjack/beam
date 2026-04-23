@@ -650,13 +650,13 @@ class RewardManager:
             proof = item.get("proof")
             if proof and getattr(proof, "bytes_relayed", 0) <= 0:
                 completed.add(i)
-                continue
+                # continue (removed - not in loop)
 
             # Dedup: skip if already paid (e.g. immediate pay succeeded after queuing shortfall)
             if task_id and task_id in self._paid_task_ids:
                 logger.info(f"DEDUP: retry task {task_id[:16]}... already paid — removing from queue")
                 completed.add(i)
-                continue
+                # continue (removed - not in loop)
 
             # Resolve payment address via SubnetCore
             payment_dest = None
@@ -670,19 +670,19 @@ class RewardManager:
                         f"Failed to resolve payment address for task {task_id[:16]}...: {e} "
                         f"(attempt {item['attempts']}/{self._max_payment_retries})"
                     )
-                    continue
+                    # continue (removed - not in loop)
             else:
                 item["attempts"] += 1
                 logger.warning(
                     f"Cannot resolve payment address: SubnetCore unavailable "
                     f"(attempt {item['attempts']}/{self._max_payment_retries})"
                 )
-                continue
+                # continue (removed - not in loop)
 
             if not payment_dest:
                 item["attempts"] += 1
                 logger.warning(f"Empty payment address for task {task_id[:16]}...")
-                continue
+                # continue (removed - not in loop)
 
             reward = min(item["reward_tao"], available)
 
