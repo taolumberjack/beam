@@ -370,7 +370,7 @@ class Orchestrator:
         # Bittensor (for signing and validator communication)
         self.wallet: Optional[bt.Wallet] = None
         self.subtensor: Optional[bt.Subtensor] = None
-        self.metagraph: Optional[bt.metagraph] = None
+        self.metagraph: Optional[bt.Metagraph] = None
         self.hotkey: Optional[str] = None
 
         # --- Manager instances ---

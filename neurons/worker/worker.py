@@ -1104,7 +1104,7 @@ def get_config():
     bt.Subtensor.add_args(parser)
 
     # Parse arguments
-    config = bt.config(parser)
+    config = bt.Config(parser)
     return config
 
 
