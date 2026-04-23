@@ -368,7 +368,7 @@ class Orchestrator:
         self.settings = settings or get_settings()
 
         # Bittensor (for signing and validator communication)
-        self.wallet: Optional[bt.wallet] = None
+        self.wallet: Optional[bt.Wallet] = None
         self.subtensor: Optional[bt.subtensor] = None
         self.metagraph: Optional[bt.metagraph] = None
         self.hotkey: Optional[str] = None

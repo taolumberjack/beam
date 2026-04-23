@@ -96,7 +96,7 @@ task_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 @dataclass
 class WorkerState:
     """Worker runtime state."""
-    wallet: Any  # bittensor.wallet
+    wallet: Any  # bittensor.Wallet
     api_url: str
     worker_id: Optional[str] = None
     api_key: Optional[str] = None
@@ -1100,7 +1100,7 @@ def get_config():
     parser = argparse.ArgumentParser(description="Beam Network Worker")
 
     # Bittensor wallet arguments
-    bt.wallet.add_args(parser)
+    bt.Wallet.add_args(parser)
     bt.subtensor.add_args(parser)
 
     # Parse arguments
@@ -1117,7 +1117,7 @@ async def main():
     config = get_config()
 
     # Load bittensor wallet
-    wallet = bt.wallet(config=config)
+    wallet = bt.Wallet(config=config)
     print(f"Wallet name: {wallet.name}")
     print(f"Hotkey name: {wallet.hotkey_str}")
 

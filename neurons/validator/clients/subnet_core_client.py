@@ -185,7 +185,7 @@ class SubnetCoreClient:
         self,
         base_url: str,
         validator_hotkey: str,
-        wallet=None,  # bittensor.wallet for signing
+        wallet=None,  # bittensor.Wallet for signing
         timeout: float = 30.0,
     ):
         """

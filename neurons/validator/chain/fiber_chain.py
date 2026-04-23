@@ -215,7 +215,7 @@ class FiberChain:
         Set weights on the subnet using Bittensor SDK.
 
         Args:
-            keypair: Validator wallet (bt.wallet) for signing
+            keypair: Validator wallet (bt.Wallet) for signing
             validator_uid: Validator's UID on the subnet
             uids: List of node UIDs to set weights for
             weights: Corresponding weights (will be normalized)
@@ -321,7 +321,7 @@ def set_weights_with_fiber(
     For repeated operations, use FiberChain class instead.
 
     Args:
-        keypair: Validator wallet (bt.wallet)
+        keypair: Validator wallet (bt.Wallet)
         validator_uid: Validator's UID
         netuid: Subnet ID
         uids: Node UIDs
