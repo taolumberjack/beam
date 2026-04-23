@@ -1101,7 +1101,7 @@ def get_config():
 
     # Bittensor wallet arguments
     bt.Wallet.add_args(parser)
-    bt.subtensor.add_args(parser)
+    bt.Subtensor.add_args(parser)
 
     # Parse arguments
     config = bt.config(parser)
