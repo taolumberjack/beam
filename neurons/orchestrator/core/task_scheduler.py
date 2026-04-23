@@ -29,6 +29,21 @@ class TaskScheduler:
         self.pending_offers: Dict[str, Any] = {}  # offer_id -> PendingOffer
         self._offer_lock = asyncio.Lock()
 
+        # Preferred worker IDs (parsed from settings)
+        self._preferred_worker_ids: Optional[Set[str]] = None
+
+    def _get_preferred_worker_ids(self) -> Set[str]:
+        """Parse PREFERRED_WORKERS env var into a set of worker IDs."""
+        if self._preferred_worker_ids is None:
+            raw = self.settings.preferred_workers
+            if raw:
+                self._preferred_worker_ids = {
+                    w.strip() for w in raw.split(",") if w.strip()
+                }
+            else:
+                self._preferred_worker_ids = set()
+        return self._preferred_worker_ids
+
     async def _save_task_to_core(
         self,
         task_id: str,
@@ -90,7 +105,34 @@ class TaskScheduler:
             logger.warning("No available workers for task")
             return None
 
-        worker = self._select_best_worker(candidates, source_region, dest_region)
+        preferred_ids = self._get_preferred_worker_ids()
+
+        # --- Preferred Workers Mode ---
+        if preferred_ids and self.settings.preferred_workers_first:
+            preferred_candidates = [w for w in candidates if w.worker_id in preferred_ids]
+            if preferred_candidates:
+                worker = self._select_best_worker(preferred_candidates, source_region, dest_region)
+                if worker:
+                    logger.info(
+                        f"[PreferredWorker] Assigned task {task_id[:16]} to "
+                        f"preferred worker {worker.worker_id[:20]}"
+                    )
+                else:
+                    # No preferred worker passed scoring (all overloaded or metrics too low)
+                    logger.debug(f"[PreferredWorker] No preferred worker passed scoring for {task_id[:16]}")
+                    worker = self._select_best_worker(candidates, source_region, dest_region)
+            else:
+                logger.debug(f"[PreferredWorker] No preferred workers available for {task_id[:16]}")
+                worker = self._select_best_worker(candidates, source_region, dest_region)
+        # --- Boost Mode ---
+        elif preferred_ids:
+            worker = self._select_best_worker(
+                candidates, source_region, dest_region, preferred_ids=preferred_ids
+            )
+        # --- Normal Mode ---
+        else:
+            worker = self._select_best_worker(candidates, source_region, dest_region)
+
         if not worker:
             return None
 
@@ -471,16 +513,11 @@ class TaskScheduler:
         candidates: List[Any],
         source_region: str,
         dest_region: str,
+        preferred_ids: Optional[Set[str]] = None,
     ) -> Optional[Any]:
         """Select the best worker for a task using multi-factor scoring.
 
-        Worker selection is based on available performance metrics from SubnetCore:
-        - trust_score: Worker trust score
-        - success_rate: Historical task success rate
-        - bandwidth_mbps: Current bandwidth from latest heartbeat
-        - load_factor: Current task load
-
-        Note: Region is not available (worker anonymity) so geo_score is neutral.
+        Supports preferred worker boosting via optional preferred_ids set.
         """
         if not candidates:
             return None
@@ -505,6 +542,16 @@ class TaskScheduler:
                 self.settings.weight_bandwidth * bandwidth_score +
                 self.settings.weight_success * success_score
             )
+
+            # Apply preferred worker boost if configured
+            if preferred_ids and worker.worker_id in preferred_ids:
+                boost = self.settings.preferred_workers_boost
+                final_score *= boost
+                logger.debug(
+                    f"[PreferredWorker] Boosted {worker.worker_id[:20]} "
+                    f"score: {final_score/boost:.3f} -> {final_score:.3f} (x{boost})"
+                )
+
             scored.append((worker, final_score))
 
         scored.sort(key=lambda x: x[1], reverse=True)

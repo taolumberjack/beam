@@ -162,6 +162,9 @@ class Worker:
     trust_score: float = 0.5  # Starts at neutral
     fraud_score: float = 0.0  # Higher = more suspicious
 
+    # Preferred worker flag (set by orchestrator config, not SubnetCore)
+    preferred: bool = False
+
     # Reward tracking
     rewards_earned_epoch: int = 0
     rewards_earned_total: int = 0

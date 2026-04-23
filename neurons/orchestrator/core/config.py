@@ -181,6 +181,23 @@ class OrchestratorSettings(BaseSettings):
     weight_success: float = Field(default=0.10, env="WEIGHT_SUCCESS")
 
     # ==========================================================================
+    # Preferred Workers
+    # ==========================================================================
+    # Comma-separated list of worker IDs to prioritize for task assignment.
+    # When set, preferred workers are tried first (if available and not overloaded).
+    # Falls back to normal scoring if no preferred worker is free.
+    # Example: "worker_abc123,worker_def456"
+    preferred_workers: Optional[str] = Field(default=None, env="PREFERRED_WORKERS")
+
+    # When True, try preferred workers before normal scoring. When False,
+    # preferred workers only get a small score boost.
+    preferred_workers_first: bool = Field(default=True, env="PREFERRED_WORKERS_FIRST")
+
+    # Score multiplier for preferred workers when preferred_workers_first=False.
+    # Applied after normal scoring. Range 1.0 (no boost) to 2.0 (double score).
+    preferred_workers_boost: float = Field(default=1.2, env="PREFERRED_WORKERS_BOOST")
+
+    # ==========================================================================
     # Reward Distribution Weights (for epoch-end payment calculation)
     # ==========================================================================
     # Primary factor: bytes relayed (work done)
