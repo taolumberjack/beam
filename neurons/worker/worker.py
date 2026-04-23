@@ -88,6 +88,7 @@ FETCH_TIMEOUT = 30  # seconds
 SEND_TIMEOUT = 30   # seconds
 MAX_RETRIES = 3
 RETRY_BACKOFF = 1.0  # Base backoff in seconds
+REPORT_MAX_RETRIES = 3  # Max retries for chunk completion reporting
 
 # Global semaphore for task concurrency
 task_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
@@ -295,33 +296,78 @@ async def complete_task(
     chunk_hash: str = "",
     error: str = None,
 ) -> bool:
-    """Report task completion via HTTP."""
-    try:
-        payload = {
-            "task_id": task_id,
-            "worker_id": state.worker_id,
-            "success": success,
-            "bytes_transferred": bytes_transferred,
-            "bandwidth_mbps": bandwidth_mbps,
-            "latency_ms": duration_ms,
-            "duration_ms": int(duration_ms),
-        }
-        if chunk_hash:
-            payload["chunk_hash"] = chunk_hash
-        if error:
-            payload["error"] = error
+    """Report task completion via HTTP.
 
-        response = await client.post(
-            f"{state.api_url}/workers/tasks/complete",
-            json=payload,
-            headers={"X-Worker-Hotkey": state.wallet.hotkey.ss58_address},
-            timeout=10.0,
-        )
-        data = response.json()
-        return data.get("success", False)
-    except Exception as e:
-        print(f"[Worker] Complete task error: {e}")
-        return False
+    Returns True if the server acknowledged task completion.
+    Retries on 5xx and network errors up to REPORT_MAX_RETRIES times.
+    """
+    payload = {
+        "task_id": task_id,
+        "worker_id": state.worker_id,
+        "success": success,
+        "bytes_transferred": bytes_transferred,
+        "bandwidth_mbps": bandwidth_mbps,
+        "latency_ms": duration_ms,
+        "duration_ms": int(duration_ms),
+    }
+    if chunk_hash:
+        payload["chunk_hash"] = chunk_hash
+    if error:
+        payload["error"] = error
+
+    headers = {"X-Worker-Hotkey": state.wallet.hotkey.ss58_address}
+    url = f"{state.api_url}/workers/tasks/complete"
+
+    for attempt in range(1, REPORT_MAX_RETRIES + 1):
+        try:
+            response = await client.post(url, json=payload, headers=headers, timeout=10.0)
+
+            # Check HTTP status before parsing JSON
+            if response.status_code == 404:
+                print(f"[Worker] Task complete: Endpoint not found (404)")
+                return False
+            if response.status_code == 401:
+                print(f"[Worker] Task complete: Unauthorized (401)")
+                return False
+            if response.status_code == 429:
+                print(f"[Worker] Task complete: Rate limited (429) — retrying")
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if response.status_code >= 500:
+                print(f"[Worker] Task complete: Server error ({response.status_code}) — retrying")
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if response.status_code >= 400:
+                print(f"[Worker] Task complete: Client error ({response.status_code})")
+                return False
+
+            try:
+                data = response.json()
+            except Exception:
+                print(f"[Worker] Task complete: Invalid JSON response (status={response.status_code})")
+                return False
+
+            if data.get("success"):
+                return True
+
+            error_msg = data.get("error", data.get("message", "unknown"))
+            print(f"[Worker] Task complete: Server rejected — {error_msg}")
+            return False
+
+        except asyncio.TimeoutError:
+            print(f"[Worker] Task complete: Timed out (attempt {attempt}/{REPORT_MAX_RETRIES})")
+            if attempt < REPORT_MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt)
+        except httpx.NetworkError as e:
+            print(f"[Worker] Task complete: Network error — {type(e).__name__}: {e} (attempt {attempt}/{REPORT_MAX_RETRIES})")
+            if attempt < REPORT_MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt)
+        except Exception as e:
+            print(f"[Worker] Task complete: Unexpected error — {type(e).__name__}: {e}")
+            return False
+
+    print(f"[Worker] Task complete: Failed after {REPORT_MAX_RETRIES} attempts")
+    return False
 
 
 async def report_chunk_complete(
@@ -332,30 +378,81 @@ async def report_chunk_complete(
     etag: Optional[str] = None,
     response_code: Optional[int] = None,
 ) -> bool:
-    """Report chunk completion to SubnetCore."""
-    try:
-        payload = {}
-        if etag:
-            payload["etag"] = etag.strip('"')
-        if response_code:
-            payload["response_code"] = response_code
+    """Report chunk completion to SubnetCore.
 
-        headers = {"X-Api-Key": state.api_key} if state.api_key else {}
+    Returns True if the server acknowledged the chunk completion.
+    Retries on 5xx and network errors up to REPORT_MAX_RETRIES times.
+    """
+    payload = {}
+    if etag:
+        payload["etag"] = etag.strip('"')
+    if response_code:
+        payload["response_code"] = response_code
 
-        response = await client.post(
-            f"{state.api_url}/transfers/{transfer_id}/chunks/{chunk_index}/complete",
-            json=payload,
-            headers=headers,
-            timeout=10.0,
-        )
-        data = response.json()
-        if data.get("success"):
-            print(f"[Worker] Chunk {chunk_index}: {data.get('chunks_completed')}/{data.get('total_chunks')}")
-            return True
-        return False
-    except Exception as e:
-        print(f"[Worker] Failed to report chunk completion: {type(e).__name__}: {e}")
-        return False
+    headers = {"X-Api-Key": state.api_key} if state.api_key else {}
+    url = f"{state.api_url}/transfers/{transfer_id}/chunks/{chunk_index}/complete"
+
+    for attempt in range(1, REPORT_MAX_RETRIES + 1):
+        try:
+            response = await client.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=10.0,
+            )
+
+            # Check HTTP status before parsing JSON
+            if response.status_code == 404:
+                print(f"[Worker] Chunk {chunk_index}: Endpoint not found (404) — transfer may not exist yet")
+                return False
+            if response.status_code == 401:
+                print(f"[Worker] Chunk {chunk_index}: Unauthorized (401) — API key may be invalid")
+                return False
+            if response.status_code == 403:
+                print(f"[Worker] Chunk {chunk_index}: Forbidden (403) — check worker permissions")
+                return False
+            if response.status_code == 429:
+                print(f"[Worker] Chunk {chunk_index}: Rate limited (429) — will retry")
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if response.status_code >= 500:
+                print(f"[Worker] Chunk {chunk_index}: Server error ({response.status_code}) — will retry")
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if response.status_code >= 400:
+                print(f"[Worker] Chunk {chunk_index}: Client error ({response.status_code})")
+                return False
+
+            # Now safe to parse JSON
+            try:
+                data = response.json()
+            except Exception:
+                print(f"[Worker] Chunk {chunk_index}: Invalid JSON response (status={response.status_code})")
+                return False
+
+            if data.get("success"):
+                print(f"[Worker] Chunk {chunk_index}: {data.get('chunks_completed')}/{data.get('total_chunks')}")
+                return True
+
+            # Server said success=false
+            error_msg = data.get("error", data.get("message", "unknown"))
+            print(f"[Worker] Chunk {chunk_index}: Server rejected completion — {error_msg}")
+            return False
+
+        except asyncio.TimeoutError:
+            print(f"[Worker] Chunk {chunk_index}: Report timed out (attempt {attempt}/{REPORT_MAX_RETRIES})")
+            if attempt < REPORT_MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt)
+        except httpx.NetworkError as e:
+            print(f"[Worker] Chunk {chunk_index}: Network error — {type(e).__name__}: {e} (attempt {attempt}/{REPORT_MAX_RETRIES})")
+            if attempt < REPORT_MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt)
+        except Exception as e:
+            print(f"[Worker] Chunk {chunk_index}: Unexpected error — {type(e).__name__}: {e}")
+            return False
+
+    print(f"[Worker] Chunk {chunk_index}: Failed to report after {REPORT_MAX_RETRIES} attempts")
+    return False
 
 
 # =============================================================================
